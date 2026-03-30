@@ -2,6 +2,7 @@
 
 namespace Drupal\leafletjs\Plugin\Block;
 
+use Drupal\Core\File\FileSystemInterface;
 use Drupal\Core\Block\BlockBase;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\file\Entity\File;
@@ -24,12 +25,13 @@ class LeafletjsBlock extends BlockBase {
    */
   public function defaultConfiguration() {
     return [
-      'map_height' => '600px',           
-      'custom_location_file' => NULL,   // Processed location data file ID
-      'override_autofit' => FALSE,      
-      'default_lat' => '0',              
-      'default_lon' => '0',              
-      'default_zoom' => '18',            
+      'map_height' => '600px',
+    // Processed location data file ID.
+      'custom_location_file' => NULL,
+      'override_autofit' => FALSE,
+      'default_lat' => '0',
+      'default_lon' => '0',
+      'default_zoom' => '18',
     ] + parent::defaultConfiguration();
   }
 
@@ -45,7 +47,7 @@ class LeafletjsBlock extends BlockBase {
     ];
 
     // Accepts CSV with format: Title, Coordinates ("lat, lon"), Link, Thumbnail
-    // OR GeoJSON with Feature properties: title, url, thumbnail
+    // OR GeoJSON with Feature properties: title, url, thumbnail.
     $form['custom_location_file'] = [
       '#type' => 'managed_file',
       '#title' => $this->t('Location Data File'),
@@ -57,7 +59,7 @@ class LeafletjsBlock extends BlockBase {
       '#default_value' => $this->configuration['custom_location_file'] ? [$this->configuration['custom_location_file']] : NULL,
     ];
 
-    // Override auto-fit behavior checkbox
+    // Override auto-fit behavior checkbox.
     $form['override_autofit'] = [
       '#type' => 'checkbox',
       '#title' => $this->t('Override auto-fit zoom and center'),
@@ -110,90 +112,104 @@ class LeafletjsBlock extends BlockBase {
    * {@inheritdoc}
    */
   public function blockSubmit($form, FormStateInterface $form_state) {
-    // Save basic configuration values
+    // Save basic configuration values.
     $this->configuration['map_height'] = $form_state->getValue('map_height');
     $this->configuration['override_autofit'] = $form_state->getValue('override_autofit');
     $this->configuration['default_lat'] = $form_state->getValue('default_lat');
     $this->configuration['default_lon'] = $form_state->getValue('default_lon');
     $this->configuration['default_zoom'] = $form_state->getValue('default_zoom');
 
-    // Handle file upload and processing
+    // Handle file upload and processing.
     $custom_file = $form_state->getValue('custom_location_file');
     if (!empty($custom_file[0])) {
+      // phpcs:ignore -- File::load calls should be avoided in classes, use dependency injection instead
       $file = File::load($custom_file[0]);
       if ($file) {
         $file_uri = $file->getFileUri();
         $file_contents = file_get_contents($file_uri);
 
         if ($file_contents) {
-          // Check if file is already processed, prevents re-processing an already converted .js file
+          // Check if file is already processed.
+          // This prevents re-processing an already converted .js file.
           if (substr(trim($file_contents), 0, 3) === 'var') {
             $this->configuration['custom_location_file'] = $custom_file[0];
           }
           else {
-            // Detect file type by extension
+            // Detect file type by extension.
             $extension = strtolower(pathinfo($file->getFilename(), PATHINFO_EXTENSION));
 
             if (in_array($extension, ['json', 'geojson'])) {
-              // GeoJSON 
+              // GeoJSON.
               $geojson_data = json_decode($file_contents, TRUE);
               if (!$geojson_data) {
+                // phpcs:ignore -- \Drupal calls should be avoided in classes, use dependency injection instead
                 \Drupal::messenger()->addError($this->t('Invalid JSON file'));
                 return;
               }
               $address_points = $geojson_data;
             }
             elseif ($extension === 'csv') {
-              // CSV 
+              // CSV.
               $lines = str_getcsv($file_contents, "\n");
-              array_shift($lines); // Remove header
+              // Remove header.
+              array_shift($lines);
               $address_points = [];
 
               foreach ($lines as $line) {
-                if (empty(trim($line))) continue;
+                if (empty(trim($line))) {
+                  continue;
+                }
                 $row = str_getcsv($line);
 
                 if (count($row) >= 2 && !empty(trim($row[0])) && !empty(trim($row[1]))) {
                   $coords = array_map('trim', explode(',', $row[1]));
                   if (count($coords) >= 2) {
                     $address_points[] = [
-                      (float) $coords[0], // Latitude
-                      (float) $coords[1], // Longitude
-                      $row[0] ?? '',      // Title
-                      $row[3] ?? '',      // Thumbnail
-                      $row[2] ?? '',      // URL
+                    // Latitude.
+                      (float) $coords[0],
+                    // Longitude.
+                      (float) $coords[1],
+                    // Title.
+                      $row[0] ?? '',
+                    // Thumbnail.
+                      $row[3] ?? '',
+                    // URL.
+                      $row[2] ?? '',
                     ];
                   }
                 }
               }
 
               if (empty($address_points)) {
+                //phpcs:ignore -- \Drupal calls should be avoided in classes, use dependency injection instead
                 \Drupal::messenger()->addError($this->t('No valid locations in CSV'));
                 return;
               }
             }
             else {
-              // Invalid file type
+              // Invalid file type.
+              //phpcs:ignore -- \Drupal calls should be avoided in classes, use dependency injection instead
               \Drupal::messenger()->addError($this->t('File must be .csv, .json, or .geojson'));
               return;
             }
 
-            // Output format based on file type
+            // Output format based on file type.
             $file_content = in_array($extension, ['json', 'geojson'])
               ? 'var geoJsonData = ' . json_encode($address_points)
               : 'var addressPoints = ' . json_encode($address_points);
 
-            // Save processed data to .js file in public://leafletjs/ directory
+            // phpcs:disable
+            // Save processed data to .js file in public://leafletjs/ directory.
             $directory = 'public://leafletjs';
-            \Drupal::service('file_system')->prepareDirectory($directory, \Drupal\Core\File\FileSystemInterface::CREATE_DIRECTORY);
+            \Drupal::service('file_system')->prepareDirectory($directory, FileSystemInterface::CREATE_DIRECTORY);
 
-            // filename
+            // Filename.
             $filename = 'addressPoints_' . time() . '.js';
             $file_uri = $directory . '/' . $filename;
 
             file_put_contents($file_uri, $file_content);
 
-            // Create Drupal managed file entity for js file 
+            // Create Drupal managed file entity for js file.
             $txt_file = File::create([
               'uri' => $file_uri,
               'status' => 1,
@@ -201,7 +217,7 @@ class LeafletjsBlock extends BlockBase {
             $txt_file->setPermanent();
             $txt_file->save();
 
-            // Delete previous location data file if one exists
+            // Delete previous location data file if one exists.
             if (!empty($this->configuration['custom_location_file']) && $this->configuration['custom_location_file'] != $custom_file[0]) {
               $old_file = File::load($this->configuration['custom_location_file']);
               if ($old_file) {
@@ -210,24 +226,27 @@ class LeafletjsBlock extends BlockBase {
               }
             }
 
-            // Delete the uploaded CSV file 
+            // Delete the uploaded CSV file.
             $file->delete();
 
-            // Save the generated .js file ID to configuration
+            // Save the generated .js file ID to configuration.
             $this->configuration['custom_location_file'] = $txt_file->id();
 
-            // Track file usage
+            // Track file usage.
             \Drupal::service('file.usage')->add($txt_file, 'leafletjs', 'block', $this->getPluginId());
 
-            // Success message
+            // Success message.
             $count = in_array($extension, ['json', 'geojson']) ? count($address_points['features'] ?? []) : count($address_points);
             \Drupal::messenger()->addStatus($this->t('Successfully processed @count locations', ['@count' => $count]));
+
+            // phpcs:enable
           }
         }
       }
     }
     else {
-      // File was removed and no new file
+      // phpcs:disable
+      // File was removed and no new file.
       if (!empty($this->configuration['custom_location_file'])) {
         $old_file = File::load($this->configuration['custom_location_file']);
         if ($old_file) {
@@ -237,6 +256,7 @@ class LeafletjsBlock extends BlockBase {
         }
       }
       $this->configuration['custom_location_file'] = NULL;
+      // phpcs:enable
     }
   }
 
@@ -248,14 +268,15 @@ class LeafletjsBlock extends BlockBase {
       '#theme' => 'leafletjs',
       '#map_height' => $this->configuration['map_height'],
       '#cache' => [
-        'max-age' => 3600, 
+        'max-age' => 3600,
       ],
     ];
 
-    // Attach base Leaflet libraries (Leaflet.js, MarkerCluster, ResetView control)
+    // Attach base Leaflet libraries.
+    // (Leaflet.js, MarkerCluster, ResetView control).
     $build['#attached']['library'][] = 'leafletjs/map_base';
 
-    // Pass configuration 
+    // Pass configuration.
     $build['#attached']['drupalSettings']['leafletjs'] = [
       'override_autofit' => (bool) $this->configuration['override_autofit'],
       'default_lat' => (float) $this->configuration['default_lat'],
@@ -263,13 +284,14 @@ class LeafletjsBlock extends BlockBase {
       'default_zoom' => (int) $this->configuration['default_zoom'],
     ];
 
-    // Load processed location data file if configured
+    // Load processed location data file if configured.
     if (!empty($this->configuration['custom_location_file'])) {
+      // phpcs:ignore -- File::load calls should be avoided in classes, use dependency injection instead
       $file = File::load($this->configuration['custom_location_file']);
       if ($file) {
         $file_url = $file->createFileUrl();
 
-        // Add the location data file as a script tag in the HTML head
+        // Add the location data file as a script tag in the HTML head.
         $build['#attached']['html_head'][] = [
           [
             '#tag' => 'script',
@@ -278,13 +300,13 @@ class LeafletjsBlock extends BlockBase {
               'type' => 'text/javascript',
             ],
           ],
-          'leafletjs_custom_location', 
+          'leafletjs_custom_location',
         ];
       }
     }
 
     // Attach map initialization script (leafletjs.js)
-    // This must load after map_base and location data
+    // This must load after map_base and location data.
     $build['#attached']['library'][] = 'leafletjs/map_init';
 
     return $build;
