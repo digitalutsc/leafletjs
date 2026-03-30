@@ -11,5 +11,5 @@ jobs:
   islandora-module-ci:
     uses: digitalutsc/reusable_workflows/.github/workflows/islandora-module-ci.yml@main
     with:
-      module_name: drupal_leafletjs
+      module_name: leafletjs
       install_chromedriver: false
