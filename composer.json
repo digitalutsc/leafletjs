@@ -1,5 +1,5 @@
 {
-  "name": "kxka/leafletjs",
+  "name": "digitalutsc/leafletjs",
   "type": "drupal-module",
   "description": "Interactive Leaflet map with marker clustering. Displays a leaflet map using a preprocessed CSV file with location data to prevent long query times for large data sets.",
   "keywords": [
@@ -11,10 +11,10 @@
     "geolocation"
   ],
   "license": "GPL-2.0-or-later",
-  "homepage": "https://github.com/Kxka/drupal_leafletjs",
+  "homepage": "https://github.com/digitalutsc/leafletjs",
   "support": {
-    "issues": "https://github.com/Kxka/drupal_leafletjs/issues",
-    "source": "https://github.com/Kxka/drupal_leafletjs"
+    "issues": "https://github.com/digitalutsc/leafletjs/issues",
+    "source": "https://github.com/digitalutsc/leafletjs"
   },
   "repositories": [
     {
