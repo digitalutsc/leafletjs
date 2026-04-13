@@ -5,7 +5,11 @@ namespace Drupal\leafletjs\Plugin\Block;
 use Drupal\Core\File\FileSystemInterface;
 use Drupal\Core\Block\BlockBase;
 use Drupal\Core\Form\FormStateInterface;
-use Drupal\file\Entity\File;
+use Drupal\Core\Messenger\MessengerInterface;
+use Drupal\file\FileUsage\FileUsageInterface;
+use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Symfony\Component\DependencyInjection\ContainerInterface;
+use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
 
 /**
  * Provides a 'LeafletJS' Block.
@@ -16,7 +20,84 @@ use Drupal\file\Entity\File;
  *   category = @Translation("Custom"),
  * )
  */
-class LeafletjsBlock extends BlockBase {
+class LeafletjsBlock extends BlockBase implements ContainerFactoryPluginInterface {
+
+  /**
+   * The messenger service.
+   *
+   * @var \Drupal\Core\Messenger\MessengerInterface
+   */
+  protected $messenger;
+
+  /**
+   * The file system.
+   *
+   * @var \Drupal\Core\File\FileSystemInterface
+   */
+  protected $fileSystem;
+
+  /**
+   * The file usage.
+   *
+   * @var \Drupal\file\FileUsage\FileUsageInterface
+   */
+  protected $fileUsage;
+
+  /**
+   * The entity type manager.
+   *
+   * @var \Drupal\Core\Entity\EntityTypeManagerInterface
+   */
+  protected $entityTypeManager;
+
+  /**
+   * Constructs a LeafletJS object.
+   *
+   * @param array $configuration
+   *   A configuration array containing information about the plugin instance.
+   * @param string $plugin_id
+   *   The plugin_id for the plugin instance.
+   * @param mixed $plugin_definition
+   *   The plugin implementation definition.
+   * @param \Drupal\Core\Messenger\MessengerInterface $messenger
+   *   The messenger service.
+   * @param \Drupal\Core\File\FileSystemInterface $fileSystem
+   *   The file system.
+   * @param \Drupal\file\FileUsage\FileUsageInterface $fileUsage
+   *   The file usage.
+   * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entityTypeManager
+   *   The entity type manager.
+   */
+  public function __construct(
+    array $configuration,
+    $plugin_id,
+    $plugin_definition,
+    MessengerInterface $messenger,
+    FileSystemInterface $fileSystem,
+    FileUsageInterface $fileUsage,
+    EntityTypeManagerInterface $entityTypeManager,
+  ) {
+    parent::__construct($configuration, $plugin_id, $plugin_definition);
+    $this->messenger = $messenger;
+    $this->fileSystem = $fileSystem;
+    $this->fileUsage = $fileUsage;
+    $this->entityTypeManager = $entityTypeManager;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
+    return new static(
+      $configuration,
+      $plugin_id,
+      $plugin_definition,
+      $container->get('messenger'),
+      $container->get('file_system'),
+      $container->get('file.usage'),
+      $container->get('entity_type.manager')
+    );
+  }
 
   /**
    * {@inheritdoc}
@@ -122,8 +203,7 @@ class LeafletjsBlock extends BlockBase {
     // Handle file upload and processing.
     $custom_file = $form_state->getValue('custom_location_file');
     if (!empty($custom_file[0])) {
-      // phpcs:ignore -- File::load calls should be avoided in classes, use dependency injection instead
-      $file = File::load($custom_file[0]);
+      $file = $this->entityTypeManager->getStorage('file')->load($custom_file[0]);
       if ($file) {
         $file_uri = $file->getFileUri();
         $file_contents = file_get_contents($file_uri);
@@ -142,8 +222,7 @@ class LeafletjsBlock extends BlockBase {
               // GeoJSON.
               $geojson_data = json_decode($file_contents, TRUE);
               if (!$geojson_data) {
-                // phpcs:ignore -- \Drupal calls should be avoided in classes, use dependency injection instead
-                \Drupal::messenger()->addError($this->t('Invalid JSON file'));
+                $this->messenger()->addError($this->t('Invalid JSON file'));
                 return;
               }
               $address_points = $geojson_data;
@@ -181,15 +260,13 @@ class LeafletjsBlock extends BlockBase {
               }
 
               if (empty($address_points)) {
-                //phpcs:ignore -- \Drupal calls should be avoided in classes, use dependency injection instead
-                \Drupal::messenger()->addError($this->t('No valid locations in CSV'));
+                $this->messenger()->addError($this->t('No valid locations in CSV'));
                 return;
               }
             }
             else {
               // Invalid file type.
-              //phpcs:ignore -- \Drupal calls should be avoided in classes, use dependency injection instead
-              \Drupal::messenger()->addError($this->t('File must be .csv, .json, or .geojson'));
+              $this->messenger()->addError($this->t('File must be .csv, .json, or .geojson'));
               return;
             }
 
@@ -198,10 +275,9 @@ class LeafletjsBlock extends BlockBase {
               ? 'var geoJsonData = ' . json_encode($address_points)
               : 'var addressPoints = ' . json_encode($address_points);
 
-            // phpcs:disable
             // Save processed data to .js file in public://leafletjs/ directory.
             $directory = 'public://leafletjs';
-            \Drupal::service('file_system')->prepareDirectory($directory, FileSystemInterface::CREATE_DIRECTORY);
+            $this->fileSystem->prepareDirectory($directory, FileSystemInterface::CREATE_DIRECTORY);
 
             // Filename.
             $filename = 'addressPoints_' . time() . '.js';
@@ -210,7 +286,7 @@ class LeafletjsBlock extends BlockBase {
             file_put_contents($file_uri, $file_content);
 
             // Create Drupal managed file entity for js file.
-            $txt_file = File::create([
+            $txt_file = $this->entityTypeManager->getStorage('file')->create([
               'uri' => $file_uri,
               'status' => 1,
             ]);
@@ -219,9 +295,9 @@ class LeafletjsBlock extends BlockBase {
 
             // Delete previous location data file if one exists.
             if (!empty($this->configuration['custom_location_file']) && $this->configuration['custom_location_file'] != $custom_file[0]) {
-              $old_file = File::load($this->configuration['custom_location_file']);
+              $old_file = $this->entityTypeManager->getStorage('file')->load($this->configuration['custom_location_file']);
               if ($old_file) {
-                \Drupal::service('file.usage')->delete($old_file, 'leafletjs', 'block', $this->getPluginId());
+                $this->fileUsage->delete($old_file, 'leafletjs', 'block', $this->getPluginId());
                 $old_file->delete();
               }
             }
@@ -233,30 +309,27 @@ class LeafletjsBlock extends BlockBase {
             $this->configuration['custom_location_file'] = $txt_file->id();
 
             // Track file usage.
-            \Drupal::service('file.usage')->add($txt_file, 'leafletjs', 'block', $this->getPluginId());
+            $this->fileUsage->add($txt_file, 'leafletjs', 'block', $this->getPluginId());
 
             // Success message.
             $count = in_array($extension, ['json', 'geojson']) ? count($address_points['features'] ?? []) : count($address_points);
-            \Drupal::messenger()->addStatus($this->t('Successfully processed @count locations', ['@count' => $count]));
+            $this->messenger()->addStatus($this->t('Successfully processed @count locations', ['@count' => $count]));
 
-            // phpcs:enable
           }
         }
       }
     }
     else {
-      // phpcs:disable
       // File was removed and no new file.
       if (!empty($this->configuration['custom_location_file'])) {
-        $old_file = File::load($this->configuration['custom_location_file']);
+        $old_file = $this->entityTypeManager->getStorage('file')->load($this->configuration['custom_location_file']);
         if ($old_file) {
-          \Drupal::service('file.usage')->delete($old_file, 'leafletjs', 'block', $this->getPluginId());
+          $this->fileUsage->delete($old_file, 'leafletjs', 'block', $this->getPluginId());
           $old_file->delete();
-          \Drupal::messenger()->addStatus($this->t('Location data file has been removed'));
+          $this->messenger()->addStatus($this->t('Location data file has been removed'));
         }
       }
       $this->configuration['custom_location_file'] = NULL;
-      // phpcs:enable
     }
   }
 
@@ -286,8 +359,7 @@ class LeafletjsBlock extends BlockBase {
 
     // Load processed location data file if configured.
     if (!empty($this->configuration['custom_location_file'])) {
-      // phpcs:ignore -- File::load calls should be avoided in classes, use dependency injection instead
-      $file = File::load($this->configuration['custom_location_file']);
+      $file = $this->entityTypeManager->getStorage('file')->load($this->configuration['custom_location_file']);
       if ($file) {
         $file_url = $file->createFileUrl();
 
