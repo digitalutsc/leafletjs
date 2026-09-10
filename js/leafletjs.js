@@ -43,7 +43,11 @@
         // Check if location data is available
         if (typeof geoJsonData !== 'undefined') {
           // GeoJSON format
-          L.geoJSON(geoJsonData, {
+          L.geoJSON(geoJsonData,{
+                style: function (feature) {
+                var c = feature.properties.color;
+                return c ? { fillColor: c, fillOpacity: 0.7, color: '#fff', weight: 1 } : {};
+            },
             onEachFeature: function(feature, layer) {
               var p = feature.properties;
               var thumbnail = p.islandora_object_thumbnail || '';
