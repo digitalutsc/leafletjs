@@ -6,6 +6,22 @@
 (function (Drupal, once) {
   'use strict';
 
+  /**
+   * Escapes a value for interpolation into popup markup.
+   *
+   * Popup HTML is assembled by concatenation below, so plain-text values
+   * coming from the uploaded data file must be escaped or any markup they
+   * contain executes in the visitor's browser.
+   */
+  function esc(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   Drupal.behaviors.leafletjs = {
     attach: function (context, settings) {
       once('leafletjs', '#leafletjs', context).forEach(function (element) {
@@ -43,22 +59,40 @@
         // Check if location data is available
         if (typeof geoJsonData !== 'undefined') {
           // GeoJSON format
-          L.geoJSON(geoJsonData,{
-                style: function (feature) {
-                var c = feature.properties.color;
-                return c ? { fillColor: c, fillOpacity: 0.7, color: '#fff', weight: 1 } : {};
+          L.geoJSON(geoJsonData, {
+            // Polygon features may carry their own fill colour. Returning an
+            // empty object leaves Leaflet's defaults alone, so point/marker
+            // data without a colour renders exactly as before.
+            style: function (feature) {
+              var colour = feature.properties && feature.properties.color;
+              return colour ? {
+                fillColor: colour,
+                fillOpacity: 0.7,
+                color: '#ffffff',
+                weight: 1
+              } : {};
             },
             onEachFeature: function(feature, layer) {
-              var p = feature.properties;
-              var thumbnail = p.islandora_object_thumbnail || '';
-              var url = p.search_api_url || '';
-              var title = p.title || '';
+              var p = feature.properties || {};
+              var popup;
 
-              var popup = '<div>' +
-                '<img src="' + thumbnail + '" class="popup-thumbnail" alt="' + title + '" onerror="this.style.display=\'none\'">' +
-                '<br>' +
-                '<a href="' + url + '" target="_blank" class="popup-title">' + title + '</a>' +
-                '</div>';
+              if (p.popupContent) {
+                // Popup markup supplied by the data file. Intentionally not
+                // escaped: it is authored HTML, which is the point of it.
+                popup = p.popupContent;
+              }
+              else {
+                // Fallback: thumbnail plus linked title.
+                var thumbnail = p.islandora_object_thumbnail || '';
+                var url = p.search_api_url || '';
+                var title = p.title || '';
+
+                popup = '<div>' +
+                  '<img src="' + esc(thumbnail) + '" class="popup-thumbnail" alt="' + esc(title) + '" onerror="this.style.display=\'none\'">' +
+                  '<br>' +
+                  '<a href="' + esc(url) + '" target="_blank" class="popup-title">' + esc(title) + '</a>' +
+                  '</div>';
+              }
 
               layer.bindPopup(popup);
               markers.addLayer(layer);
