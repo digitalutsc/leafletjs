@@ -95,6 +95,8 @@
           }
 
           var hasPolygons = false;
+          // region_code -> layer, so a legend row can zoom to its region.
+          var zoomTargets = {};
 
           // GeoJSON format
           var geojson = L.geoJSON(geoJsonData, {
@@ -140,6 +142,9 @@
               // data must not get these handlers or the first hover throws.
               if (layer.setStyle) {
                 hasPolygons = true;
+                if (p.region_code && layer.getBounds) {
+                  zoomTargets[p.region_code] = layer;
+                }
                 layer.on({
                   mouseover: highlightFeature,
                   mouseout: resetHighlight,
@@ -164,13 +169,33 @@
 
             legend.onAdd = function () {
               var div = L.DomUtil.create('div', 'leafletjs-info leafletjs-legend');
+
               div.innerHTML = geoJsonData.legend.map(function (entry) {
                 var swatch = '<i style="background:' + esc(entry.color) + '"></i> ';
                 var label = esc(entry.name);
+                // zoomTo wins over url: frame the region on this map rather
+                // than navigating away. Falls back to the plain label if the
+                // named region has no drawn geometry to zoom to.
+                if (entry.zoomTo) {
+                  return zoomTargets[entry.zoomTo]
+                    ? swatch + '<a href="#" data-zoom-to="' + esc(entry.zoomTo) + '">' + label + '</a>'
+                    : swatch + label;
+                }
                 return entry.url
                   ? swatch + '<a href="' + esc(entry.url) + '" target="_blank" rel="noopener">' + label + '</a>'
                   : swatch + label;
               }).join('<br>');
+
+              Array.prototype.forEach.call(div.querySelectorAll('[data-zoom-to]'), function (el) {
+                L.DomEvent.on(el, 'click', function (e) {
+                  L.DomEvent.preventDefault(e);
+                  var target = zoomTargets[el.getAttribute('data-zoom-to')];
+                  if (target) {
+                    map.fitBounds(target.getBounds());
+                  }
+                });
+              });
+
               // Let clicks reach the links instead of panning the map.
               L.DomEvent.disableClickPropagation(div);
               return div;
