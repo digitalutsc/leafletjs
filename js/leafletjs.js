@@ -58,8 +58,46 @@
 
         // Check if location data is available
         if (typeof geoJsonData !== 'undefined') {
+          // Hover readout. Only added when the data has polygons to hover.
+          var info = L.control();
+
+          info.onAdd = function () {
+            this._div = L.DomUtil.create('div', 'leafletjs-info');
+            this.update();
+            return this._div;
+          };
+
+          info.update = function (props) {
+            var body = props && props.region_name
+              ? '<b>' + esc(props.region_name) + '</b>'
+              : Drupal.t('Hover over a region');
+            this._div.innerHTML = body;
+          };
+
+          function highlightFeature(e) {
+            e.target.setStyle({
+              weight: 5,
+              color: '#666',
+              dashArray: '',
+              fillOpacity: 0.7
+            });
+            e.target.bringToFront();
+            info.update(e.target.feature.properties);
+          }
+
+          function resetHighlight(e) {
+            geojson.resetStyle(e.target);
+            info.update();
+          }
+
+          function zoomToFeature(e) {
+            map.fitBounds(e.target.getBounds());
+          }
+
+          var hasPolygons = false;
+
           // GeoJSON format
-          L.geoJSON(geoJsonData, {
+          var geojson = L.geoJSON(geoJsonData, {
             // Polygon features may carry their own fill colour. Returning an
             // empty object leaves Leaflet's defaults alone, so point/marker
             // data without a colour renders exactly as before.
@@ -69,7 +107,8 @@
                 fillColor: colour,
                 fillOpacity: 0.7,
                 color: '#ffffff',
-                weight: 1
+                weight: 2,
+                dashArray: '3'
               } : {};
             },
             onEachFeature: function(feature, layer) {
@@ -95,9 +134,50 @@
               }
 
               layer.bindPopup(popup);
+
+              // Only vector layers can be restyled, raised, or bounds-fitted.
+              // L.Marker has none of setStyle/bringToFront/getBounds, so point
+              // data must not get these handlers or the first hover throws.
+              if (layer.setStyle) {
+                hasPolygons = true;
+                layer.on({
+                  mouseover: highlightFeature,
+                  mouseout: resetHighlight,
+                  // bindPopup already opens the popup on click; this adds the
+                  // zoom, so one click does both.
+                  click: zoomToFeature
+                });
+              }
+
               markers.addLayer(layer);
             }
           });
+
+          if (hasPolygons) {
+            info.addTo(map);
+          }
+
+          // Legend entries come from an optional top-level "legend" array in
+          // the data file, for regions that have no geometry to draw.
+          if (geoJsonData.legend && geoJsonData.legend.length) {
+            var legend = L.control({position: 'bottomright'});
+
+            legend.onAdd = function () {
+              var div = L.DomUtil.create('div', 'leafletjs-info leafletjs-legend');
+              div.innerHTML = geoJsonData.legend.map(function (entry) {
+                var swatch = '<i style="background:' + esc(entry.color) + '"></i> ';
+                var label = esc(entry.name);
+                return entry.url
+                  ? swatch + '<a href="' + esc(entry.url) + '" target="_blank" rel="noopener">' + label + '</a>'
+                  : swatch + label;
+              }).join('<br>');
+              // Let clicks reach the links instead of panning the map.
+              L.DomEvent.disableClickPropagation(div);
+              return div;
+            };
+
+            legend.addTo(map);
+          }
         }
         else if (typeof addressPoints !== 'undefined' && addressPoints.length > 0) {
           // CSV array format

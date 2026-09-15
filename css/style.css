@@ -81,3 +81,33 @@ body > span {
 	font-size: 14px;
 	color: #666;
 }
+
+/* Hover readout and legend controls.
+   Namespaced rather than the tutorial's bare .info/.legend, which are far too
+   generic to add to a Drupal theme's global stylesheet. */
+.leafletjs-info {
+	padding: 6px 8px;
+	font: 14px/16px Arial, Helvetica, sans-serif;
+	background: rgba(255, 255, 255, 0.8);
+	box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+	border-radius: 5px;
+}
+
+.leafletjs-info h4 {
+	margin: 0 0 5px;
+	color: #777;
+}
+
+.leafletjs-legend {
+	text-align: left;
+	line-height: 18px;
+	color: #555;
+}
+
+.leafletjs-legend i {
+	width: 18px;
+	height: 18px;
+	float: left;
+	margin-right: 8px;
+	opacity: 0.7;
+}
