@@ -56,23 +56,35 @@
         });
         resetControl.addTo(map);
 
+        // Declared out here because the auto-fit block below is shared with the
+        // CSV branch. Stays empty (and invalid) for data with no region codes.
+        var focusBounds = null;
+
         // Check if location data is available
         if (typeof geoJsonData !== 'undefined') {
-          // Hover readout. Only added when the data has polygons to hover.
-          var info = L.control();
+          // Hover readout. Opt-in from the data file via a top-level
+          //   "info": {"placeholder": "Hover over a region"}
+          // No placeholder in the data means no hover box at all, so existing
+          // maps are unaffected. Treated as plain text, not markup.
+          var infoText = (geoJsonData.info && geoJsonData.info.placeholder) || '';
+          var info = null;
+          var hasPolygons = false;
 
-          info.onAdd = function () {
-            this._div = L.DomUtil.create('div', 'leafletjs-info');
-            this.update();
-            return this._div;
-          };
+          if (infoText) {
+            info = L.control();
 
-          info.update = function (props) {
-            var body = props && props.region_name
-              ? '<b>' + esc(props.region_name) + '</b>'
-              : Drupal.t('Hover over a region');
-            this._div.innerHTML = body;
-          };
+            info.onAdd = function () {
+              this._div = L.DomUtil.create('div', 'leafletjs-info');
+              this.update();
+              return this._div;
+            };
+
+            info.update = function (props) {
+              this._div.innerHTML = props && props.region_name
+                ? '<b>' + esc(props.region_name) + '</b>'
+                : esc(infoText);
+            };
+          }
 
           function highlightFeature(e) {
             e.target.setStyle({
@@ -82,20 +94,30 @@
               fillOpacity: 0.7
             });
             e.target.bringToFront();
-            info.update(e.target.feature.properties);
+            if (info) {
+              info.update(e.target.feature.properties);
+            }
           }
 
           function resetHighlight(e) {
             geojson.resetStyle(e.target);
-            info.update();
+            if (info) {
+              info.update();
+            }
           }
 
           function zoomToFeature(e) {
             map.fitBounds(e.target.getBounds());
           }
 
-          var hasPolygons = false;
-          // region_code -> layer, so a legend row can zoom to its region.
+          // Bounds of the Quebec regions only, so non-Quebec features (Ottawa,
+          // Winnipeg) can be drawn without dragging the initial view off Quebec.
+          focusBounds = L.latLngBounds([]);
+
+          // region_code -> [layer], so a legend row can zoom to its region.
+          // An array, not a single layer: a region may be drawn as several
+          // separate features (Côte-Nord has a second "Tracé de 1927" polygon),
+          // and zooming must frame all of them.
           var zoomTargets = {};
 
           // GeoJSON format
@@ -143,7 +165,12 @@
               if (layer.setStyle) {
                 hasPolygons = true;
                 if (p.region_code && layer.getBounds) {
-                  zoomTargets[p.region_code] = layer;
+                  (zoomTargets[p.region_code] = zoomTargets[p.region_code] || []).push(layer);
+                  // Numeric codes are the Quebec administrative regions; OTT
+                  // and WMR are deliberately excluded from the initial framing.
+                  if (/^\d+$/.test(p.region_code)) {
+                    focusBounds.extend(layer.getBounds());
+                  }
                 }
                 layer.on({
                   mouseover: highlightFeature,
@@ -158,12 +185,15 @@
             }
           });
 
-          if (hasPolygons) {
+          // Needs something hoverable to be worth showing, so point-only data
+          // never gets an empty panel it can never fill.
+          if (info && hasPolygons) {
             info.addTo(map);
           }
 
           // Legend entries come from an optional top-level "legend" array in
-          // the data file, for regions that have no geometry to draw.
+          // the data file. Each row may zoom to a drawn region (zoomTo), link
+          // out (url), or be a plain colour key with neither.
           if (geoJsonData.legend && geoJsonData.legend.length) {
             var legend = L.control({position: 'bottomright'});
 
@@ -178,7 +208,8 @@
                 // named region has no drawn geometry to zoom to.
                 if (entry.zoomTo) {
                   return zoomTargets[entry.zoomTo]
-                    ? swatch + '<a href="#" data-zoom-to="' + esc(entry.zoomTo) + '">' + label + '</a>'
+                    ? swatch + '<a href="#" data-zoom-to="' + esc(entry.zoomTo) + '" title="' +
+                      Drupal.t('Zoom to this region') + '">' + label + '</a>'
                     : swatch + label;
                 }
                 return entry.url
@@ -189,15 +220,22 @@
               Array.prototype.forEach.call(div.querySelectorAll('[data-zoom-to]'), function (el) {
                 L.DomEvent.on(el, 'click', function (e) {
                   L.DomEvent.preventDefault(e);
-                  var target = zoomTargets[el.getAttribute('data-zoom-to')];
-                  if (target) {
-                    map.fitBounds(target.getBounds());
+                  var layers = zoomTargets[el.getAttribute('data-zoom-to')];
+                  if (layers && layers.length) {
+                    var bounds = layers[0].getBounds();
+                    for (var i = 1; i < layers.length; i++) {
+                      bounds = bounds.extend(layers[i].getBounds());
+                    }
+                    map.fitBounds(bounds);
                   }
                 });
               });
 
-              // Let clicks reach the links instead of panning the map.
+              // Let clicks reach the links instead of panning the map, and let
+              // the wheel scroll the (capped, scrollable) list instead of
+              // zooming the map underneath it.
               L.DomEvent.disableClickPropagation(div);
+              L.DomEvent.disableScrollPropagation(div);
               return div;
             };
 
@@ -221,7 +259,11 @@
           // Keep configured default center and zoom
         } else {
           setTimeout(function() {
-            var bounds = markers.getBounds();
+            // Prefer the Quebec-only bounds when the data supplies them; fall
+            // back to every layer for point/CSV data that has no region codes.
+            var bounds = (focusBounds && focusBounds.isValid())
+              ? focusBounds
+              : markers.getBounds();
             if (bounds.isValid()) {
               map.fitBounds(bounds, {
                 padding: [50, 50],

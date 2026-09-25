@@ -93,15 +93,27 @@ body > span {
 	border-radius: 5px;
 }
 
-.leafletjs-info h4 {
-	margin: 0 0 5px;
-	color: #777;
-}
-
 .leafletjs-legend {
 	text-align: left;
 	line-height: 18px;
 	color: #555;
+	/* A full region list runs to ~19 rows, taller than half a 600px map.
+	   Cap it and scroll rather than letting it cover the map. A percentage
+	   would not resolve: Leaflet's .leaflet-bottom corner has no set height. */
+	max-height: min(320px, 45vh);
+	overflow-y: auto;
+	background: rgba(255, 255, 255, 0.9);
+}
+
+.leafletjs-legend a {
+	color: #2563eb;
+	text-decoration: none;
+	cursor: pointer;
+}
+
+.leafletjs-legend a:hover,
+.leafletjs-legend a:focus {
+	text-decoration: underline;
 }
 
 .leafletjs-legend i {
