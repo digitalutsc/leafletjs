@@ -22,6 +22,39 @@
       .replace(/'/g, '&#39;');
   }
 
+  /**
+   * Current interface language as a two-letter code.
+   *
+   * Reads the lang attribute on <html>, falling back to Drupal's own
+   * currentLanguage. Regional tags like "en-CA" are reduced to "en".
+   */
+  function currentLang(settings) {
+    var fromHtml = (document.documentElement.getAttribute('lang') || '').split('-')[0];
+    var fromDrupal = ((settings && settings.path && settings.path.currentLanguage) || '').split('-')[0];
+    return (fromHtml || fromDrupal || 'en').toLowerCase();
+  }
+
+  /**
+   * Resolves a property that may be either a plain value or a map of
+   * language code to value, e.g. {"en": "...", "fr": "..."}.
+   *
+   * Falls back to English, then to any value present, so a map missing the
+   * active language still renders something rather than an empty popup.
+   */
+  function byLang(value, lang) {
+    if (!value || typeof value === 'string') {
+      return value || '';
+    }
+    if (value[lang]) {
+      return value[lang];
+    }
+    if (value.en) {
+      return value.en;
+    }
+    var keys = Object.keys(value);
+    return keys.length ? value[keys[0]] : '';
+  }
+
   Drupal.behaviors.leafletjs = {
     attach: function (context, settings) {
       once('leafletjs', '#leafletjs', context).forEach(function (element) {
@@ -66,7 +99,8 @@
           //   "info": {"placeholder": "Hover over a region"}
           // No placeholder in the data means no hover box at all, so existing
           // maps are unaffected. Treated as plain text, not markup.
-          var infoText = (geoJsonData.info && geoJsonData.info.placeholder) || '';
+          var lang = currentLang(settings);
+          var infoText = byLang(geoJsonData.info && geoJsonData.info.placeholder, lang);
           var info = null;
           var hasPolygons = false;
 
@@ -139,16 +173,20 @@
               var p = feature.properties || {};
               var popup;
 
-              if (p.popupContent) {
+              // Any of these may be a single value or a per-language map,
+              // e.g. "popupContent": {"en": "...", "fr": "..."}.
+              var content = byLang(p.popupContent, lang);
+
+              if (content) {
                 // Popup markup supplied by the data file. Intentionally not
                 // escaped: it is authored HTML, which is the point of it.
-                popup = p.popupContent;
+                popup = content;
               }
               else {
                 // Fallback: thumbnail plus linked title.
-                var thumbnail = p.islandora_object_thumbnail || '';
-                var url = p.search_api_url || '';
-                var title = p.title || '';
+                var thumbnail = byLang(p.islandora_object_thumbnail, lang);
+                var url = byLang(p.search_api_url, lang);
+                var title = byLang(p.title, lang);
 
                 popup = '<div>' +
                   '<img src="' + esc(thumbnail) + '" class="popup-thumbnail" alt="' + esc(title) + '" onerror="this.style.display=\'none\'">' +
@@ -202,7 +240,8 @@
 
               div.innerHTML = geoJsonData.legend.map(function (entry) {
                 var swatch = '<i style="background:' + esc(entry.color) + '"></i> ';
-                var label = esc(entry.name);
+                // name and url may also be per-language maps.
+                var label = esc(byLang(entry.name, lang));
                 // zoomTo wins over url: frame the region on this map rather
                 // than navigating away. Falls back to the plain label if the
                 // named region has no drawn geometry to zoom to.
@@ -212,8 +251,9 @@
                       Drupal.t('Zoom to this region') + '">' + label + '</a>'
                     : swatch + label;
                 }
-                return entry.url
-                  ? swatch + '<a href="' + esc(entry.url) + '" target="_blank" rel="noopener">' + label + '</a>'
+                var entryUrl = byLang(entry.url, lang);
+                return entryUrl
+                  ? swatch + '<a href="' + esc(entryUrl) + '" target="_blank" rel="noopener">' + label + '</a>'
                   : swatch + label;
               }).join('<br>');
 
